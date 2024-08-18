@@ -1,0 +1,205 @@
+---
+title: 'Final Project 1: Reproducible Report on NYPD Shooting Incident Data (Historic)'
+author: "Karin Rosvall-Clausen"
+date: "2024-08-17"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#the below required libraries might need to be installed prior to knitting the file
+library("tidyverse")
+library("ggthemes")
+library("lubridate")
+```
+
+### Summary NYPD Shooting Incident Data (Historic)
+
+The NYPD Shooting Incident Data (Historic) dataset includes information about every shooting incident that occurred in NYC from 2006 through the end of the previous calendar year.  The data is manually collected and reviewed by the Office of Management Analysis and Planning prior to being posted on the NYPD website.  As of August 17, 2024, the data was last updated on 4/23/2024.  For more details, you can visit the specific "about_data" webpage at: <https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Historic-/833y-fsy8/about_data>. 
+
+### Import Data
+
+```{r get_nypd_shooting_dataset, message=FALSE}
+nypd_shooting_dataset <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv")
+```
+
+### Review Data
+
+1. review the imported data tibble
+```{r review_tibble_initial}
+nypd_shooting_dataset
+```
+
+2. glimpse the imported data
+```{r glimpse_data}
+glimpse(nypd_shooting_dataset)
+```
+
+3. view the imported data
+```{r view_data}
+view(nypd_shooting_dataset)
+```
+
+### What do I want to learn about the NYPD Shooting Incident Data (Historic)?
+
+1. How many total shootings occurred in each Borough and show the split between how many did and did not result in death (statistical_murder_flag = true)?
+2. How many total shootings occurred in each Borough by year?
+
+### Tidy and Transform data
+
+1. Create a new dataset with only the below columns, convert the OCCUR_DATE from chr to date, rename columns and remove duplicate rows:
+
+  + INCIDENT_KEY
+  + OCCUR_DATE - CONVERT FROM CHR > DATE
+  + BORO
+  + STATISTICAL_MURDER_FLAG
+
+```{r create_new_dataset}
+clean_victim_dataset <- nypd_shooting_dataset |>
+  mutate(
+    DATE = mdy(OCCUR_DATE)) |>
+  select(INCIDENT_KEY, DATE, BORO, STATISTICAL_MURDER_FLAG) |>
+  distinct()
+```
+
+2. review summary of the NEW dataset
+```{r review_summary_new_data}
+summary(clean_victim_dataset)
+```
+
+3. view the NEW dataset
+```{r view_summary_new_data}
+view(clean_victim_dataset)
+```
+After a quick review by sorting the data, it appears all the columns have "valid" data.
+
+4. check each remaining column for null data
+```{r check_dataset_for_null_values, results='hide'}
+which(is.na(clean_victim_dataset$DATE))
+which(is.na(clean_victim_dataset$BORO))
+which(is.na(clean_victim_dataset$STATISTICAL_MURDER_FLAG))
+```
+There is no missing (NA) data in the columns
+
+### Visualize and Analyze data
+
+#### Question 1:
+How many total shootings occurred in each Borough and show the split between how many did and did not result in death (statistical_murder_flag = true)
+
+```{r plot_default_data, echo=FALSE}
+min_date <- format(min(clean_victim_dataset$DATE), format = "%m/%d/%Y")
+max_date <- format(max(clean_victim_dataset$DATE), format = "%m/%d/%Y")
+subtitle <- str_c("From: ", min_date, " - ", max_date)
+```
+
+```{r plot 1, echo=FALSE, warning=FALSE}
+clean_victim_dataset |>
+  ggplot(aes(y = fct_infreq(BORO), fill = STATISTICAL_MURDER_FLAG)) +
+  geom_bar() +
+  geom_text(
+    aes(label=..count..),
+    vjust = -0.5, size = 3,
+    stat='count',
+    position = position_dodge(width = 1)
+  ) +
+  labs(
+    title = "Total number of shooting incidents in NYC by Borough",
+    subtitle = subtitle,
+    x = "Total shooting incidents", y = "Borough")
+```
+
+##### Analysis:
+
+The borough of Brooklyn has the most shooting incidents and deaths of all the boroughs of NYC recorded from 1/1/2006 - 12/29/2023.  Based upon the rendered graph it appears the proportion of deaths/shooting incident in the Bronx might be higher than the proportion of deaths/shooting incidents in Brooklyn. 
+
+
+```{r total shooting counts, echo=FALSE, message=FALSE}
+daily_shooting_counts <- clean_victim_dataset |>
+  group_by(BORO, DATE) |>
+  arrange(BORO,DATE) |> 
+  summarize(
+    daily_shootings = sum(STATISTICAL_MURDER_FLAG == FALSE),
+    daily_murders = sum(STATISTICAL_MURDER_FLAG == TRUE),
+    daily_shootings_murders = daily_shootings + daily_murders
+    )
+```
+Based upon the above data, Brooklyn has a higher murder/shooting incident percentage than the Bronx.
+
+```{r count_check, echo=FALSE}
+total_shooting_counts <- daily_shooting_counts |> 
+  group_by(BORO) |> 
+  summarise(
+    total_shootings = sum(daily_shootings),
+    total_murders = sum(daily_murders),
+    total_shootings_murders = total_shootings + total_murders,
+    total_shootings_pct = (total_shootings / total_shootings_murders) * 100,
+    total_murders_pct = (total_murders / total_shootings_murders) * 100 
+  )
+```
+
+```{r brooklyn_bronx_murder_pct, echo=FALSE, results='markup'}
+total_shooting_counts |> 
+  filter(BORO %in% c("BROOKLYN","BRONX")) |> 
+  select(BORO, total_murders_pct) |> 
+  arrange(desc(total_murders_pct))
+```
+
+##### Additional Questions:  
+
+1. Which borough has the highest proportion of deaths/shooting incidents?
+2. Which has the lowest?
+```{r all_boro_murder_pcts, echo=FALSE, results='markup'}
+total_shooting_counts |> 
+  select(BORO, total_murders_pct) |> 
+  arrange(desc(total_murders_pct))
+```
+
+#### Question 2: 
+How many total shootings occurred in each Borough by year
+
+```{r yearly_shootings, echo=FALSE, message=FALSE}
+yearly_boro_shootings <- clean_victim_dataset |>
+  group_by(BORO, year = year(DATE)) |> 
+  summarize(count = n())
+```
+
+```{r plot 2, echo=FALSE, message=FALSE}
+yearly_boro_shootings |>
+  ggplot(aes(x = year, y = count, color = BORO)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "NYC shooting trends in NYC by Borough",
+    subtitle = subtitle,
+    x = "Year", y = "Total count"
+  )
+```
+##### Analysis: 
+Below is a summary of the year in which each borough had the most recorded shooting incidents since 1/1/2006:
+
+
+```{r highest count per boro, echo=FALSE, message=FALSE}
+yearly_boro_shootings |> 
+  arrange(BORO, desc(count)) |> 
+  slice_head(n = 1)
+```
+
+##### Additional Questions: 
+
+1. Why or what was going on in 2021 that resulted in the highest number of shootings in the Bronx and Manhattan?
+2. Why or what was going on in 2008 that resulted in the highest number of shootings in Queens and Staten Island?  Did it have to do with the financial problems in 2008?
+3. Why did the Bronx and Brooklyn boroughs see a significant decline in shootings from 2011 to 2019?
+4. Why did shooting incidents spike in 2020 for all boroughs?  Was it Covid related?
+
+### Bias identification
+
+#### Conclusion:
+Brooklyn and the Bronx are the most unsafe boroughs of NYC where Staten Island is the safest based upon total recorded shooting incidents since 2006.  
+
+#### Personal Bias:
+
+In the above statement, I used the words "unsafe" and "safest" and tried to "mitigate" my personal bias of what this word means by including the additional verbiage "based upon recorded shooting incidents since 2006."  However, there are many other ways to be "unsafe" such as car accidents, drug overdose (via illegal and/or prescription drugs), domestic violence, robbery, etc.  Also, Staten Island has the highest percentage of shootings that resulted in murder compared to the other boroughs.  Based upon this information, would some people consider Staten Island and the most unsafe borough?

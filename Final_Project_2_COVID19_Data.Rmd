@@ -1,0 +1,456 @@
+---
+title: 'Final Project 2: Reproducible Report on COVID19 Data'
+author: "Karin Rosvall-Clausen"
+date: "2024-08-17"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#the below required libraries might need to be installed prior to knitting the file
+library("tidyverse")
+library("lubridate")
+library("tinytex")
+```
+
+### Summary Johns Hopkins University COVID-19 Data 
+The JHU CSSE COVID-19 Time series summary dataset contains US and global data related to confirmed cases, recovered cases and deaths related to the Novel Coronavirus 2019 epidemic.  The data was collected on a daily basis by the Johns Hopkins University Center for Systems Science and Engineering (JHU CSSE) from January 21, 2020 through March 9, 2023.  For more details, you can visit the specific "README.md" webpages at:
+* <https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/README.md>
+* <https://github.com/CSSEGISandData/COVID-19/blob/master/csse_covid_19_data/csse_covid_19_time_series/README.md>
+
+### Import Data
+I only want to do analysis on US data, so I am only going to import the US data.
+
+1. configure URLs
+
+```{r get_covid_data, results='hide'}
+#read in the base URL for all the data files
+url_in <- "https://github.com/CSSEGISandData/COVID-19/raw/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+#read in the file names
+file_names <- 
+c("time_series_covid19_confirmed_US.csv",
+  "time_series_covid19_deaths_US.csv"
+  )
+url
+#combine the base URL with the file names
+urls <- str_c(url_in,file_names)
+```
+
+2. import all data into datasets
+``` {r import_data, message=FALSE}
+us_cases <- read_csv(urls[1])
+us_deaths <- read_csv(urls[2])
+```
+
+### Review Data
+
+1. review the imported data tibble
+```{r review_tibble_initial, results='hide'}
+us_cases
+us_deaths
+```
+
+2. glimpse the imported data
+```{r glimpse_data, results='hide'}
+glimpse(us_cases)
+glimpse(us_deaths)
+```
+
+3. view the summary of the data
+```{r summary_data, results='hide'}
+summary(us_cases)
+summary(us_deaths)
+```
+
+### Tidy and Transform data
+
+1. clean up and pivot us_cases data
+```{r tidy_us_cases}
+us_cases <- us_cases |> 
+  select(!(UID:FIPS) & !(Country_Region:Combined_Key)) |>
+  pivot_longer(cols = -c('Admin2',
+                         'Province_State',),
+               names_to = "Date",
+               values_to = "Cases")
+```
+
+2. clean up and pivot us_deaths data
+``` {r tidy_us_deaths}
+us_deaths <- us_deaths |>
+  select(!(UID:FIPS) & !(Country_Region:Combined_Key)) |>
+  pivot_longer(cols = -c('Admin2',
+                         'Province_State',
+                         'Population'),
+               names_to = "Date",
+               values_to = "Deaths")
+```
+
+3. join us_cases with us_deaths
+```{r join_us_cases_and_deaths, message=FALSE}
+us_cases_and_deaths <- us_cases |>
+  full_join(us_deaths) |>
+  rename(County = 'Admin2',
+         State = 'Province_State') |>
+  mutate(Date = mdy(Date)) |>
+  relocate(Date:Cases, .after = Population) |>
+  relocate(State)
+```
+
+4. review a summary of the us_cases_and_deaths data
+``` {r us_cases_and_deaths_summary}
+summary(us_cases_and_deaths)
+```
+Review results of the summary of data:
+
+* State - looks OK
+* County - looks OK
+* Population - why is there a county without a population?  This doesn't seem correct
+* Date - looks ok
+* Cases - there are negative cases. I only want to look at positive cases, so I am going to exclude this data from the analysis.
+* Deaths - there are negative cases.  Not sure what that means, so will look at the data to see what is in the data set.
+
+5. review Population = 0 data more closely
+```{r zero_population_data_check}
+us_cases_and_deaths |> 
+  filter(Population == 0 & Cases > 0 & Deaths > 0) |> 
+  summarize(
+    .by = c(State, County)
+  )
+```
+A quick review of ALL 66 "Counties" with Population = 0 who the values are either "unassigned", "Out of XX" or correctional facilities.  Some of the others with names that seem like counties look like they are names for public health departments after conducting searches on the internet.  As a result of this research, I am going to exclude this data from my analysis.
+
+
+6. remove zero population data
+```{r remove_zero_population_rows}
+us_cases_and_deaths <- us_cases_and_deaths |>
+  filter(Population > 0)
+
+summary(us_cases_and_deaths)
+```
+Removing the "invalid" counties has seemed to clean up the negative cases and deaths.  The Population, Date, Cases and Deaths max data all match the data before removing the "invalid" counties.  This seems OK.
+
+7.  update data to only keep those where count of cases > 0.  Not going to filter out deaths > 0 because a person can have a case of Covid and not die.
+```{r remove_zero_cases}
+us_cases_and_deaths <- us_cases_and_deaths |> 
+  filter(Cases > 0)
+
+summary(us_cases_and_deaths)
+```
+Removing the data where cases = 0 did not change the Population, Date, Cases and Deaths max data.  This seems correct.
+
+ 
+8. check all columns for the existence of any rows with values = NA
+```{r invalid_data_check, results='hide'}
+which(is.na(us_cases_and_deaths$State))
+which(is.na(us_cases_and_deaths$County))
+which(is.na(us_cases_and_deaths$Date))
+which(is.na(us_cases_and_deaths$Cases))
+which(is.na(us_cases_and_deaths$Deaths))
+```
+ 
+A manual review of the results from the above revealed there was County data with NA values.
+
+9. Deeper check of County data with values = NA
+```{r county_na_data_check}
+us_cases_and_deaths |> 
+  filter(is.na(County)) |> 
+  summarize(
+    .by = State)
+```
+The County == NA data seems OK for the associated "State".  Will leave this data in the dataset.  Now I have learned that Northern Mariana Islands is an "unincorporated territory and commonwealth of the US".  Interesting.  
+
+10. Conduct a quick check on the State data
+```{r state_date_check}
+us_cases_and_deaths |> 
+  distinct(State)
+```
+Manual review of all 66 State data rows seems OK.
+
+11. last check ... remove any duplicate rows
+```{r remove_duplicate_rows}
+us_cases_and_deaths <- us_cases_and_deaths |> 
+  distinct()
+
+summary(us_cases_and_deaths)
+```
+All the summary data is the same prior to running a distinct on the data, so it appears there were no duplicate rows.
+
+12. create grouped data by state and add per hundred columns for both cases and deaths
+```{r grouped_state_data, echo=FALSE, message=FALSE}
+us_cases_and_deaths_by_state <- us_cases_and_deaths |> 
+  group_by(State, Date) |> 
+  summarize(
+    Cases = sum(Cases),
+    Deaths = sum(Deaths),
+    Population = sum(Population)
+  ) |> 
+  mutate(
+    Cases_per_hundred = Cases * 100 / Population,
+    Deaths_per_hundred = Deaths * 100 / Population) |> 
+  ungroup()
+
+summary(us_cases_and_deaths_by_state)
+```
+
+I experimented with cases/deaths per million, thousand, hundred and just cases. I liked the cases/deaths per hundred visualization the best, so I ended up changing how I created the us_cases_and_deaths_by_state dataset.
+
+### What do I want to learn about the US Covid data?
+
+#### Question 1:
+What is the trend of **cases** from the date of the first occurrence of a case to the last date data was recorded for the state with the highest (Massachusetts) and lowest (Mississippi) percentage of people having a bachelor's degree or higher educational attainment per wikipedia (https://en.wikipedia.org/wiki/List_of_U.S._states_and_territories_by_educational_attainment).
+
+
+```{r ma_ms_data, echo=FALSE}
+# Create a new dataset with only Massachusetts(MA) and Mississippi(MS) state data
+ma_ms_data <- us_cases_and_deaths_by_state |>
+  filter(State %in% c("Massachusetts", "Mississippi"))
+```
+
+### Visualize and Analyze data
+
+```{r plot_default_data, echo=FALSE}
+
+#setup start and end date of dataset to be used by subsequent plots
+min_date <- format(min(us_cases_and_deaths$Date), format = "%m/%d/%Y")
+max_date <- format(max(us_cases_and_deaths$Date), format = "%m/%d/%Y")
+subtitle <- str_c("From: ", min_date, " - ", max_date)
+```
+
+```{r plot_Mass_Miss_cases, echo=FALSE}
+ma_ms_data |> 
+  ggplot(aes(x = Date, y = Cases_per_hundred)) +
+  geom_line(aes(color = State)) +
+  labs(
+    title = "Trend of cases for Massachusetts and Mississippi",
+    subtitle = subtitle,
+    x = "Date", y = "Cases per hundred"
+  ) 
+```
+
+##### Analysis:
+
+At the onset of COVID-19, Massachusetts had a higher number of cases compared to Mississippi. However, starting sometime after June 2020 and continuing through the end of the recorded data period, Mississippi's case numbers surpassed those of Massachusetts. Despite this shift, both states exhibit a similar upward trend in their case patterns.
+
+##### Additional Questions: 
+
+1. What are the first dates that each state recorded a case?
+```{r plot1_Q1}
+#query for Q1
+ma_ms_data |>
+  group_by(State) |> 
+  slice_head(n=1) |> 
+  select(State, Date, Cases, Deaths)
+```
+
+2. What date did MS report more cases than MA and what was the number of cases?
+```{r plot1_Q2}
+# query for Q2
+# I manually reviewed and narrowed down the dates.  I'm sure there is a function in R which can help
+# but I spent quite a bit of time trying to find it, so I switched to "manual review" steps.
+
+ma_ms_data |>
+  filter(Date >= "2020-07-21" & Date <= "2020-07-23") |> 
+  arrange(Date) |> 
+  select(State, Date, Cases_per_hundred)
+```
+* __July 22, 2020__
+
+  
+#### Question 2:
+What is the trend of **deaths** from the date of the first occurrence of a case to the last date data was recorded for the state with the highest (Massachusetts) and lowest (Mississippi) percentage of people having a bachelor's degree or higher educational attainment per wikipedia (https://en.wikipedia.org/wiki/List_of_U.S._states_and_territories_by_educational_attainment).
+
+```{r plot_Mass_Miss_deaths, echo=FALSE}
+ma_ms_data |>
+  ggplot(aes(x = Date, y = Deaths_per_hundred)) +
+  geom_line(aes(color = State)) +
+  labs(
+    title = "Trend of deaths for Massachusetts and Mississippi",
+    subtitle = subtitle,
+    x = "Date", y = "Deaths per hundred"
+  ) 
+```
+
+##### Analysis:
+
+Similar to the trend of cases reported, Massachusetts looks like it recorded more deaths at an earlier date than Mississippi.  However at some date closer to the end of 2020 and continuing through the end of the recorded data period, the number of deaths reported in Mississippi surpassed those of Massachusetts.  
+
+
+##### Additional Questions: 
+I have the same 2 questions as above only about deaths and a few others.
+
+1. What are the first dates that each state recorded a death?
+```{r plot2_Q1}
+#query for Q1
+ma_ms_data |> 
+  group_by(State) |> 
+  filter(Deaths > 0) |> 
+  slice_head(n=1) |> 
+      select(State, Date, Cases, Deaths)
+```
+After reviewing actual data, Mississippi recorded the state's first death from Covid-19 before Massachusetts, which is hard to tell from the graph above.
+
+2. What date did MS report more cases than MA and what was the number of deaths?
+```{r plot2_Q2}
+# query for Q2
+# I manually reviewed and narrowed down the dates.  I'm sure there is a function in R which can help
+# but I spent quite a bit of time trying to find it, so I switched to "manual review" steps.
+
+ma_ms_data |>
+  filter(Date >= "2020-12-10" & Date <= "2020-12-14") |>
+  arrange(Date) |>
+  select(State, Date, Deaths_per_hundred)
+
+```
+* __December 12, 2020__
+ 
+ 3. On the last recorded date, what are the total cases and deaths per hundred for each state?
+```{r plot1and2_Q3}
+#query for Q3
+ma_ms_end_totals <- ma_ms_data |>
+  group_by(State) |> 
+  slice_tail(n=1) |> 
+  select(State, Date, Cases_per_hundred, Deaths_per_hundred)
+
+ma_ms_end_totals
+```
+
+4. What are the proportional differences between Massachusetts and Mississippi for cases per hundred and deaths per hundred on the last recorded date?
+```{r plot_1and2_Q4, echo=FALSE}
+
+# cases proportion calcs:
+
+# Extract cases per hundred for Massachusetts and Mississippi
+ma_cases_per_hundred <- ma_ms_end_totals |>
+  filter(State == "Massachusetts") |>
+  pull(Cases_per_hundred)
+
+ms_cases_per_hundred <- ma_ms_end_totals |>
+  filter(State == "Mississippi") |>
+  pull(Cases_per_hundred)
+
+# Calculate the absolute difference and mean
+abs_diff_cases <- abs(ma_cases_per_hundred - ms_cases_per_hundred)
+mean_cases <- (ma_cases_per_hundred + ms_cases_per_hundred) / 2
+
+# Calculate the proportional difference
+cases_proportional_difference <- (abs_diff_cases / mean_cases) * 100
+
+# deaths proportion calcs:
+
+# Extract cases per hundred for Massachusetts and Mississippi
+ma_deaths_per_hundred <- ma_ms_end_totals |>
+  filter(State == "Massachusetts") |>
+  pull(Deaths_per_hundred)
+
+ms_deaths_per_hundred <- ma_ms_end_totals |>
+  filter(State == "Mississippi") |>
+  pull(Deaths_per_hundred)
+
+# Calculate the absolute difference and mean
+abs_diff_deaths <- abs(ma_deaths_per_hundred - ms_deaths_per_hundred)
+mean_deaths <- (ma_deaths_per_hundred + ms_deaths_per_hundred) / 2
+
+# Calculate the proportional difference
+deaths_proportional_difference <- (abs_diff_deaths / mean_deaths) * 100
+```
+
+```{r print_proprotional_diffs, echo=FALSE}
+print(paste("Percentage difference in total cases =", round(cases_proportional_difference,2)))
+print(paste("Percentage difference in total deaths =", round(deaths_proportional_difference,2)))
+```
+On March 9, 2023, Mississippi had higher percentages of cases and deaths compared to Massachusetts:
+
+* Cases: 12.58%
+* Deaths: 23.7%
+
+### Model Deaths to Cases per hundred for both Massachusetts and Mississippi
+
+```{r cases_deaths_model}
+mod <- lm(Deaths_per_hundred ~ Cases_per_hundred, data = ma_ms_data)
+
+summary(mod)
+```
+
+```{r ma_ms_w_predictions, echo=FALSE}
+ma_ms_mod_w_predictions <- ma_ms_data |>
+  mutate(pred = predict(mod))
+```
+
+```{r plot_ma_mod_w_predictions, echo=FALSE}
+ma_ms_mod_w_predictions |> 
+  filter(State == "Massachusetts") |> 
+  ggplot() +
+  geom_point(aes(x = Cases_per_hundred, y = Deaths_per_hundred), color = "blue") +
+  geom_point(aes(x = Cases_per_hundred, y =  pred), color = "red") +
+  labs(
+    title = "Actual (blue) vs. Predictions (red) of deaths to cases for Massachusetts",
+    subtitle = subtitle,
+    x = "Cases per hundred", y = "Deaths per hundred"
+  ) 
+```
+
+##### Analysis:
+For the state of Massachusetts, the prediction trend is higher then the actual trend.
+
+
+```{r plot_ms_mod_w_predictions, echo=FALSE}
+ma_ms_mod_w_predictions |> 
+  filter(State == "Mississippi") |> 
+  ggplot() +
+  geom_point(aes(x = Cases_per_hundred, y = Deaths_per_hundred), color = "green") +
+  geom_point(aes(x = Cases_per_hundred, y =  pred), color = "red") +
+  labs(
+    title = "Actual (green) vs. Predictions (red) of deaths to cases for Mississippi",
+    subtitle = subtitle,
+    x = "Cases per hundred", y = "Deaths per hundred"
+  ) 
+```
+
+##### Analysis:
+For the state of Mississippi, the prediction trend is lower then the actual trend.
+
+### Bias Identification
+
+#### Conclusion:
+
+Based on the above analysis, Massachusetts, which has a higher percentage of residents with a bachelor's degree or higher educational attainment according to [Wikipedia: List of U.S. states and territories by educational attainment]((https://en.wikipedia.org/wiki/List_of_U.S._states_and_territories_by_educational_attainment), reported lower COVID-19 case and death counts compared to Mississippi, which has a lower level of educational attainment. This conclusion is supported by the following evidence:
+
+*  COVID-19 cases in Massachusetts began earlier than in Mississippi, but after July 22, 2020, the decline in cases in Massachusetts was slower.
+*  Mississippi recorded its first death before Massachusetts.
+*  The death rate in Mississippi increased more rapidly than in Massachusetts.
+*  As of March 9, 2023, Mississippi had a 12.58% higher rate of cases and a 23.7% higher rate of deaths compared to Massachusetts.
+
+
+#### Bias identification in data and analysis:
+
+In my analysis, several potential sources of bias in the data and methodology should be considered:
+
+##### Data Bias
+1. Consistency in Reporting Criteria:
+    + Are both states using the same criteria to identify and record COVID-19 cases and deaths?
+    + Were cases and deaths accurately recorded as COVID-19 related in each state?
+
+2. Reliability of Educational Data:
+
+    + Is the educational attainment data from Wikipedia reliable?
+    + Are the same criteria used across states to determine the percentage of residents with a bachelor's degree or higher?
+    + Were consistent date ranges applied for collecting this data?
+
+##### Analysis Bias
+1. Choice of Educational Data Source:
+    + I relied on Wikipedia to determine educational levels. While it provided specific information, I should assess whether other sources might offer more authoritative data. My choice was influenced by the immediate availability and perceived reliability of the data, which could introduce personal bias.
+    + Is the percentage of residents with a bachelor's degree or higher the most appropriate measure of educational attainment for this analysis?
+
+2. Handling of Zero Population Data:
+    + I excluded data where the population was zero. It’s worth considering whether including this data might have led to a more accurate analysis and if any zero-population rows were present for the states being compared.
+
+3. Initial Trend Analysis:
+    + My initial determination of which state recorded the first death was based on visual trends, which later revealed discrepancies when cross-checked with actual data values. Mississippi had the first recorded death, not Massachusetts.
+
+4. Methodological Accuracy:
+    +  Did I apply the correct formulas to compare proportional differences in total cases and deaths, and to model deaths relative to cases for each state?
