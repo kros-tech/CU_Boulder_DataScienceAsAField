@@ -3,9 +3,9 @@ title: 'Final Project 1: Reproducible Report on NYPD Shooting Incident Data (His
 author: "Karin Rosvall-Clausen"
 date: "2024-08-17"
 output:
-  word_document: default
-  pdf_document: default
   html_document: default
+  pdf_document: default
+  word_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -51,7 +51,7 @@ view(nypd_shooting_dataset)
 
 ### Tidy and Transform data
 
-1. Create a new dataset with only the below columns, convert the OCCUR_DATE from chr to date, rename columns and remove duplicate rows:
+1. Create a new dataset with only the below columns, converted the OCCUR_DATE from chr to date, and removed duplicate rows:
 
   + INCIDENT_KEY
   + OCCUR_DATE - CONVERT FROM CHR > DATE
@@ -114,10 +114,9 @@ clean_victim_dataset |>
 
 ##### Analysis:
 
-The borough of Brooklyn has the most shooting incidents and deaths of all the boroughs of NYC recorded from 1/1/2006 - 12/29/2023.  Based upon the rendered graph it appears the proportion of deaths/shooting incident in the Bronx might be higher than the proportion of deaths/shooting incidents in Brooklyn. 
+The borough of Brooklyn has the most shooting incidents and deaths of all the boroughs of NYC recorded from 1/1/2006 - 12/29/2023.  Based upon the rendered graph it also appears Brooklyn might have the highest percentage of murders/shootings than any other borough.
 
-
-```{r total shooting counts, echo=FALSE, message=FALSE}
+```{r total shooting counts, message=FALSE}
 daily_shooting_counts <- clean_victim_dataset |>
   group_by(BORO, DATE) |>
   arrange(BORO,DATE) |> 
@@ -127,7 +126,11 @@ daily_shooting_counts <- clean_victim_dataset |>
     daily_shootings_murders = daily_shootings + daily_murders
     )
 ```
-Based upon the above data, Brooklyn has a higher murder/shooting incident percentage than the Bronx.
+
+##### Additional Questions:  
+
+1. Which borough has the highest proportion of deaths/shooting incidents?
+2. Which has the lowest?
 
 ```{r count_check, echo=FALSE}
 total_shooting_counts <- daily_shooting_counts |> 
@@ -141,20 +144,9 @@ total_shooting_counts <- daily_shooting_counts |>
   )
 ```
 
-```{r brooklyn_bronx_murder_pct, echo=FALSE, results='markup'}
-total_shooting_counts |> 
-  filter(BORO %in% c("BROOKLYN","BRONX")) |> 
-  select(BORO, total_murders_pct) |> 
-  arrange(desc(total_murders_pct))
-```
-
-##### Additional Questions:  
-
-1. Which borough has the highest proportion of deaths/shooting incidents?
-2. Which has the lowest?
 ```{r all_boro_murder_pcts, echo=FALSE, results='markup'}
 total_shooting_counts |> 
-  select(BORO, total_murders_pct) |> 
+  select(BORO, total_murders_pct, total_shootings, total_murders, total_shootings_murders) |> 
   arrange(desc(total_murders_pct))
 ```
 
@@ -178,21 +170,30 @@ yearly_boro_shootings |>
     x = "Year", y = "Total count"
   )
 ```
-##### Analysis: 
-Below is a summary of the year in which each borough had the most recorded shooting incidents since 1/1/2006:
+
+##### Analysis:
+
+It appears most of the boroughs had a significant decline in shootings from 2011 to 2019.  Then in 2020 the number of incidents for all boroughs increased to 2019 levels or more.
 
 
-```{r highest count per boro, echo=FALSE, message=FALSE}
-yearly_boro_shootings |> 
-  arrange(BORO, desc(count)) |> 
-  slice_head(n = 1)
+```{r highest count per boro}
+boro_shootings_2011_2019_2020 <- yearly_boro_shootings  |> 
+  filter(year %in% c("2011", "2019", "2020"))  |> 
+  pivot_wider(names_from = year, values_from = count, names_prefix = "year_")  |> 
+  rename(year_2011 = year_2011, year_2019 = year_2019, year_2020 = year_2020) |> 
+  mutate(
+    decr_pct_2011_to_2019 = ((year_2011 - year_2019)/year_2011) * -100,
+    incr_pct_2019_to_2020 = ((year_2020 - year_2019)/year_2019) * 100,
+    .before = 2
+    ) |> 
+  arrange(decr_pct_2011_to_2019)
+
+boro_shootings_2011_2019_2020
 ```
 
 ##### Additional Questions: 
 
-1. Why or what was going on in 2021 that resulted in the highest number of shootings in the Bronx and Manhattan?
-2. Why or what was going on in 2008 that resulted in the highest number of shootings in Queens and Staten Island?  Did it have to do with the financial problems in 2008?
-3. Why did the Bronx and Brooklyn boroughs see a significant decline in shootings from 2011 to 2019?
+1. Why did all the boroughs see a significant decline in shootings from 2011 to 2019?
 4. Why did shooting incidents spike in 2020 for all boroughs?  Was it Covid related?
 
 ### Bias identification
@@ -202,4 +203,4 @@ Brooklyn and the Bronx are the most unsafe boroughs of NYC where Staten Island i
 
 #### Personal Bias:
 
-In the above statement, I used the words "unsafe" and "safest" and tried to "mitigate" my personal bias of what this word means by including the additional verbiage "based upon recorded shooting incidents since 2006."  However, there are many other ways to be "unsafe" such as car accidents, drug overdose (via illegal and/or prescription drugs), domestic violence, robbery, etc.  Also, Staten Island has the highest percentage of shootings that resulted in murder compared to the other boroughs.  Based upon this information, would some people consider Staten Island and the most unsafe borough?
+In the above statement, I used the terms "unsafe" and "safest" and attempted to "mitigate" my personal bias by including the phrase "based on recorded shooting incidents since 2006." However, there are many other factors that can contribute to being "unsafe," such as car accidents, drug overdoses (both illegal and prescription), domestic violence, and robbery. Additionally, Staten Island has the highest percentage of shootings that have resulted in murder compared to the other boroughs. Given this information, might some people consider Staten Island to be the most unsafe borough?
