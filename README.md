@@ -3,8 +3,8 @@ This final project consists of the below two .Rmd files, which demonstrates my a
 I completed in the data anlysis process of the NYPD Shooting Incident Data (Historic) and the Johns Hopkins University Center for Systems Science and Engineering
 COVID-19 Time series summary datasets.
 
-* Final_Project_1_NYPD_Shooting_Incident_Data.Rmd
-* Final_Project_2_COVID19_Data.Rmd
+* `Final_Project_1_NYPD_Shooting_Incident_Data.Rmd`
+* `Final_Project_2_COVID19_Data.Rmd`
 
 # Steps
 1. Download both R Markdown files listed above.
